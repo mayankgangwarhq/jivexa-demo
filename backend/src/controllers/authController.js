@@ -13,7 +13,6 @@ const {
   OTP_RESEND_COOLDOWN_SECONDS 
 } = require('../services/otpService');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'jivexa_health_jwt_secret_key_2026_super_secure_auth_token_string';
 const MAX_FAILED_LOGINS = 5;
 const LOCK_TIME_MS = 15 * 60 * 1000; // 15-minute lockout
 
@@ -31,7 +30,7 @@ const isOtpEnabled = () => {
 
 // Helper to generate signed JWT token
 const generateToken = (id, email, role, name, roleId) => {
-  const secretKey = process.env.JWT_SECRET || JWT_SECRET;
+  const secretKey = process.env.JWT_SECRET;
   if (!secretKey) {
     throw new Error('JWT secret key is not configured in backend environment');
   }
@@ -57,7 +56,7 @@ const registerUser = async (req, res) => {
   try {
     const validationResult = signupSchema.safeParse(req.body);
     if (!validationResult.success) {
-      const issues = validationResult.error.issues || validationResult.error.errors || [];
+      const issues = validationResult.error.issues || [];
       const firstError = issues[0]?.message || 'Invalid input data';
       return res.status(400).json({
         success: false,
@@ -76,8 +75,8 @@ const registerUser = async (req, res) => {
     if (existingUser) {
       return res.status(409).json({
         success: false,
-        error: 'An account with this email already exists. Please log in.',
-        message: 'An account with this email already exists. Please log in.'
+        error: 'An account with this email already exists.',
+        message: 'An account with this email already exists.'
       });
     }
 
@@ -95,7 +94,7 @@ const registerUser = async (req, res) => {
       email: cleanEmail,
       password: hashedPassword,
       role: userRole,
-      age: age || null,
+      age: age !== undefined ? age : null,
       phone: req.body.phone || '',
       healthId: generatedHealthId,
       emailVerified: true,
@@ -169,6 +168,13 @@ const registerUser = async (req, res) => {
       user: userRecord.toAuthJSON ? userRecord.toAuthJSON() : userRecord
     });
   } catch (error) {
+    if (error.code === 11000 || (error.name === 'MongoServerError' && error.code === 11000)) {
+      return res.status(409).json({
+        success: false,
+        error: 'An account with this email already exists.',
+        message: 'An account with this email already exists.'
+      });
+    }
     console.error('[Backend Auth Signup Error]:', error);
     return res.status(500).json({
       success: false,
@@ -365,12 +371,13 @@ const loginUser = async (req, res) => {
   try {
     const validationResult = loginSchema.safeParse(req.body);
     if (!validationResult.success) {
-      const issues = validationResult.error.issues || validationResult.error.errors || [];
+      const issues = validationResult.error.issues || [];
       const firstError = issues[0]?.message || 'Invalid input data';
       return res.status(400).json({
         success: false,
         error: firstError,
-        message: firstError
+        message: firstError,
+        details: issues
       });
     }
 
@@ -527,11 +534,13 @@ const updateProfile = async (req, res) => {
   try {
     const validationResult = updateProfileSchema.safeParse(req.body);
     if (!validationResult.success) {
-      const firstError = validationResult.error.errors[0]?.message || 'Invalid profile update data';
+      const issues = validationResult.error.issues || [];
+      const firstError = issues[0]?.message || 'Invalid profile update data';
       return res.status(400).json({
         success: false,
         error: firstError,
-        message: firstError
+        message: firstError,
+        details: issues
       });
     }
 
