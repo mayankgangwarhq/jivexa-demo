@@ -2,19 +2,18 @@ const config = require('../config/env');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { isDatabaseConnected } = require('../config/db');
-
 const JWT_FALLBACK_SECRET = config.auth.jwtSecret;
 
 const protect = async (req, res, next) => {
   let token;
 
-  // 1. Check for token in Cookies (from httpOnly cookie)
-  if (req.cookies && req.cookies.token) {
-    token = req.cookies.token;
+  // 1. Check for token in Authorization Header (Bearer token format)
+  if (req.headers.authorization && req.headers.authorization.toLowerCase().startsWith('bearer ')) {
+    token = req.headers.authorization.slice(7).trim();
   }
-  // 2. Check for token in Authorization Header (Bearer token format)
-  else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    token = req.headers.authorization.split(' ')[1];
+  // 2. Check for token in Cookies (from httpOnly cookie)
+  else if (req.cookies && req.cookies.token) {
+    token = req.cookies.token;
   }
 
   if (!token) {
@@ -26,7 +25,10 @@ const protect = async (req, res, next) => {
   }
 
   try {
-    const secretKey = config.auth.jwtSecret;
+    const secretKey = config.auth.jwtSecret || process.env.JWT_SECRET;
+    if (!secretKey) {
+      return res.status(500).json({ success: false, message: 'Server configuration error: JWT_SECRET is not configured', error: 'JWT_SECRET missing' });
+    }
     const decoded = jwt.verify(token, secretKey);
 
     if (!decoded || (!decoded.id && !decoded.email)) {
@@ -69,10 +71,10 @@ const protect = async (req, res, next) => {
 const optionalProtect = async (req, res, next) => {
   let token;
 
-  if (req.cookies && req.cookies.token) {
+  if (req.headers.authorization && req.headers.authorization.toLowerCase().startsWith('bearer ')) {
+    token = req.headers.authorization.slice(7).trim();
+  } else if (req.cookies && req.cookies.token) {
     token = req.cookies.token;
-  } else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    token = req.headers.authorization.split(' ')[1];
   }
 
   if (!token) {
@@ -81,7 +83,10 @@ const optionalProtect = async (req, res, next) => {
   }
 
   try {
-    const secretKey = config.auth.jwtSecret;
+    const secretKey = config.auth.jwtSecret || process.env.JWT_SECRET;
+    if (!secretKey) {
+      return res.status(500).json({ success: false, message: 'Server configuration error: JWT_SECRET is not configured', error: 'JWT_SECRET missing' });
+    }
     const decoded = jwt.verify(token, secretKey);
 
     if (!decoded || (!decoded.id && !decoded.email)) {

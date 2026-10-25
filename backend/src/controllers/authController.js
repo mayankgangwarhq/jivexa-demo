@@ -58,7 +58,7 @@ const registerUser = async (req, res) => {
   try {
     const validationResult = signupSchema.safeParse(req.body);
     if (!validationResult.success) {
-      const issues = validationResult.error.issues || validationResult.error.errors || [];
+      const issues = validationResult.error.issues || [];
       const firstError = issues[0]?.message || 'Invalid input data';
       return res.status(400).json({
         success: false,
@@ -77,8 +77,8 @@ const registerUser = async (req, res) => {
     if (existingUser) {
       return res.status(409).json({
         success: false,
-        error: 'An account with this email already exists. Please log in.',
-        message: 'An account with this email already exists. Please log in.'
+        error: 'An account with this email already exists.',
+        message: 'An account with this email already exists.'
       });
     }
 
@@ -96,7 +96,7 @@ const registerUser = async (req, res) => {
       email: cleanEmail,
       password: hashedPassword,
       role: userRole,
-      age: age || null,
+      age: age !== undefined ? age : null,
       phone: req.body.phone || '',
       healthId: generatedHealthId,
       emailVerified: true,
@@ -173,8 +173,8 @@ const registerUser = async (req, res) => {
     if (error.code === 11000 || (error.name === 'MongoServerError' && error.code === 11000)) {
       return res.status(409).json({
         success: false,
-        error: 'An account with this email already exists. Please log in.',
-        message: 'An account with this email already exists. Please log in.'
+        error: 'An account with this email already exists.',
+        message: 'An account with this email already exists.'
       });
     }
     console.error('[Backend Auth Signup Error]:', error);
@@ -373,12 +373,13 @@ const loginUser = async (req, res) => {
   try {
     const validationResult = loginSchema.safeParse(req.body);
     if (!validationResult.success) {
-      const issues = validationResult.error.issues || validationResult.error.errors || [];
+      const issues = validationResult.error.issues || [];
       const firstError = issues[0]?.message || 'Invalid input data';
       return res.status(400).json({
         success: false,
         error: firstError,
-        message: firstError
+        message: firstError,
+        details: issues
       });
     }
 
@@ -535,11 +536,13 @@ const updateProfile = async (req, res) => {
   try {
     const validationResult = updateProfileSchema.safeParse(req.body);
     if (!validationResult.success) {
-      const firstError = validationResult.error.errors[0]?.message || 'Invalid profile update data';
+      const issues = validationResult.error.issues || [];
+      const firstError = issues[0]?.message || 'Invalid profile update data';
       return res.status(400).json({
         success: false,
         error: firstError,
-        message: firstError
+        message: firstError,
+        details: issues
       });
     }
 

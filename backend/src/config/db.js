@@ -4,6 +4,10 @@ const config = require('./env');
 let isConnecting = false;
 let connectionError = null;
 
+const getMongoUri = () => {
+  return config.db.mongoUri;
+};
+
 /**
  * Validate MongoDB URI format and ensure no empty or placeholder strings
  */
@@ -29,7 +33,7 @@ const connectDB = async () => {
   const mongoUri = config.db.mongoUri;
 
   if (!mongoUri || !config.db.isConfigured()) {
-    connectionError = 'MONGO_URI is not configured or contains placeholder credentials';
+    connectionError = 'Database URI is not configured or contains placeholder credentials';
     console.warn(`[MongoDB Warning] ${connectionError}. Please set a valid MONGO_URI in backend/.env`);
     return null;
   }
@@ -54,6 +58,7 @@ const connectDB = async () => {
     isConnecting = false;
     connectionError = error.message;
     console.error(`[MongoDB Connection Error] Failed to connect: ${error.message}`);
+    console.error('[MongoDB Hint] Please check your Atlas Network Access IP allowlist (allow your current IP or 0.0.0.0/0) and ensure special characters in the database password are properly URL-encoded (e.g. using encodeURIComponent).');
     return null;
   }
 };
@@ -79,7 +84,7 @@ const checkDatabaseHealth = async () => {
       connected: false,
       database: 'MongoDB Atlas',
       state: 'UNCONFIGURED',
-      message: connectionError || 'MONGO_URI not configured in backend environment'
+      message: connectionError || 'Database URI (MONGO_URI / MONGO_URL) not configured in backend environment'
     };
   }
 

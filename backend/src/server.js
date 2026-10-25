@@ -4,12 +4,13 @@ config.validateEnv();
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const mongoose = require('mongoose');
 
-const { connectDB, isMongoConfigured, checkDatabaseHealth } = require('./config/db');
+const { connectDB, isMongoConfigured, checkDatabaseHealth, isDatabaseConnected } = require('./config/db');
 
 const app = express();
 
-// Trust proxy for secure cookies and reverse proxies (Render, Cloudflare, Vercel)
+// Trust proxy for secure cookies behind reverse proxies (Render, Cloudflare, Vercel, etc.)
 app.set('trust proxy', 1);
 
 // Configure CORS for Cookie & Authorization header transmission across any deployed origin
@@ -39,10 +40,22 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
+// Database connection fail-fast guard middleware for auth endpoints
+const requireDbConnection = (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      error: 'Database is not connected',
+      message: 'Database service is currently unavailable. Please ensure MongoDB is connected.'
+    });
+  }
+  next();
+};
+
 // Auth, Clinical, Pharmacy, Ambulance & AI API Routes
 const authRoutes = require('./routes/authRoutes');
-app.use('/api/auth', authRoutes);
-app.use('/user', authRoutes);
+app.use('/api/auth', requireDbConnection, authRoutes);
+app.use('/user', requireDbConnection, authRoutes);
 app.use('/api/health-id', require('./routes/healthIdRoutes'));
 app.use('/api/appointments', require('./routes/appointmentRoutes'));
 app.use('/api/prescriptions', require('./routes/prescriptionRoutes'));
@@ -113,7 +126,8 @@ process.on('unhandledRejection', (reason) => {
 });
 
 process.on('uncaughtException', (err) => {
-  console.error('[Process] Handled uncaught exception safely:', err.message);
+  console.error('[Process] Fatal uncaught exception:', err?.stack || err);
+  process.exit(1);
 });
 
 const PORT = config.server.port;
@@ -121,16 +135,34 @@ const HOST = config.server.host;
 
 const startServer = async () => {
   try {
-    // 1. Connect to MongoDB Atlas if configured
+    // 0. Ensure JWT_SECRET is configured
+    if (!config.auth.jwtSecret) {
+      console.error('[JIVEXA Backend] Fatal Error: JWT_SECRET environment variable is missing. A secure secret is required to sign and verify authentication tokens. Please configure JWT_SECRET in .env.');
+      process.exit(1);
+    }
+
+    // 1. Connect to MongoDB with startup retry (up to 3 attempts)
     if (isMongoConfigured()) {
-      console.log(`[MongoDB] URI detected (${config.db.getMaskedUri()}). Connecting to MongoDB Atlas...`);
-      try {
-        await connectDB();
-      } catch (err) {
-        console.warn('[MongoDB] Initial connection error on startup:', err.message);
+      console.log(`[MongoDB] URI detected (${config.db.getMaskedUri()}). Connecting to MongoDB...`);
+      const MAX_RETRIES = 3;
+      const RETRY_DELAY_MS = 1500;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          await connectDB();
+          if (isDatabaseConnected()) break;
+        } catch (err) {
+          console.warn(`[MongoDB] Startup connection attempt ${attempt}/${MAX_RETRIES} error:`, err.message);
+        }
+        if (!isDatabaseConnected() && attempt < MAX_RETRIES) {
+          console.log(`[MongoDB] Retrying database connection in ${RETRY_DELAY_MS}ms (attempt ${attempt}/${MAX_RETRIES})...`);
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+        }
+      }
+      if (!isDatabaseConnected()) {
+        console.warn('[MongoDB] Failed to connect to MongoDB after 3 attempts. Server will run in degraded mode.');
       }
     } else {
-      console.warn('[MongoDB] MONGO_URI is not set in backend/.env. Server running in degraded mode.');
+      console.warn('[MongoDB] Database URI (MONGO_URI / MONGO_URL) is not set in backend/.env. Server will run in degraded mode until configured.');
     }
 
     // 2. Start Express server and attach error listeners explicitly on 0.0.0.0
@@ -148,11 +180,12 @@ const startServer = async () => {
           `[JIVEXA Backend] Port ${PORT} is already in use by another process. Please terminate the existing process listening on port ${PORT}.`
         );
       } else {
-        console.error('[JIVEXA Backend] Server listen error:', err.message);
+        console.error('[JIVEXA Backend] Server error:', err.message);
       }
     });
   } catch (error) {
     console.error('[JIVEXA Backend] Unexpected startup error:', error);
+    process.exit(1);
   }
 };
 
