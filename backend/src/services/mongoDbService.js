@@ -5,6 +5,7 @@ const Prescription = require('../models/Prescription');
 const PharmacyOrder = require('../models/PharmacyOrder');
 const AmbulanceRequest = require('../models/AmbulanceRequest');
 const Conversation = require('../models/Conversation');
+const MedicalReport = require('../models/MedicalReport');
 const {
   connectDB,
   disconnectDB,
@@ -86,9 +87,6 @@ const MongoDb = {
 
     async create(data) {
       const payload = { ...data };
-      if (payload.healthId) {
-        payload.healthId = payload.healthId.toUpperCase().trim();
-      }
       if (payload.id && !payload._id) {
         payload._id = String(payload.id);
       }
@@ -239,6 +237,55 @@ const MongoDb = {
     async deleteMany(filter = {}) {
       return await Conversation.deleteMany(filter);
     }
+  },
+
+  // --- MEDICAL REPORTS ---
+  medicalReports: {
+    async create(data) {
+      const payload = { ...data };
+      if (payload.id && !payload._id) {
+        payload._id = String(payload.id);
+      }
+      return await MedicalReport.create(payload);
+    },
+
+    async find(filter = {}) {
+      return await MedicalReport.find(filter).sort({ createdAt: -1 });
+    },
+
+    async findById(id) {
+      if (!id) return null;
+      return await MedicalReport.findOne({ _id: String(id) });
+    },
+
+    async findOne(filter = {}) {
+      return await MedicalReport.findOne(filter);
+    },
+
+    async shareWithDoctor(reportId, patientId, doctorData) {
+      return await MedicalReport.findOneAndUpdate(
+        { _id: String(reportId), patientId: String(patientId) },
+        {
+          $addToSet: {
+            sharedWithDoctors: {
+              doctorId: String(doctorData.doctorId),
+              doctorName: doctorData.doctorName || 'Doctor',
+              sharedAt: new Date(),
+              reviewStatus: 'Pending Review'
+            }
+          }
+        },
+        { new: true }
+      );
+    },
+
+    async deleteById(id, patientId) {
+      if (!id) return false;
+      const query = { _id: String(id) };
+      if (patientId) query.patientId = String(patientId);
+      const res = await MedicalReport.deleteOne(query);
+      return res.deletedCount > 0;
+    }
   }
 };
 
@@ -252,4 +299,3 @@ module.exports = {
   isDatabaseConnected,
   checkDatabaseHealth
 };
-

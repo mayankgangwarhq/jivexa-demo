@@ -4,6 +4,7 @@ export interface AIResponse {
   suggestions: string[];
   disclaimer: string;
   provider?: string;
+  errorCode?: string;
   limitReached?: boolean;
   tokensUsed?: number;
   maxTokens?: number;
@@ -540,12 +541,58 @@ export const streamAIHealthAssistant = async (
       })
     });
 
-    if (response.ok && response.body) {
+    if (!response.ok) {
+      let errorBody: any = null;
+      try {
+        errorBody = await response.json();
+      } catch (e) {
+        try { errorBody = await response.text(); } catch (_) {}
+      }
+
+      let errorMsg = '';
+      let errorCode = 'BACKEND_ERROR';
+
+      if (response.status === 400) {
+        errorCode = errorBody?.oversized ? 'INPUT_TOO_LARGE' : 'BAD_REQUEST';
+        errorMsg = errorBody?.error || 'Invalid request format or input. Please check your message.';
+      } else if (response.status === 401) {
+        errorCode = 'UNAUTHORIZED';
+        errorMsg = errorBody?.message || 'Authentication session expired or invalid. Please login again.';
+      } else if (response.status === 403) {
+        errorCode = 'FORBIDDEN';
+        errorMsg = errorBody?.message || 'You do not have permission to access this healthcare service.';
+      } else if (response.status === 429) {
+        errorCode = 'RATE_LIMIT_EXCEEDED';
+        errorMsg = errorBody?.error || 'Rate limit reached: You have sent too many requests. Please wait a moment before sending another message.';
+      } else if (response.status === 503) {
+        errorCode = 'AI_TEMPORARILY_UNAVAILABLE';
+        errorMsg = 'JIVEXA AI service is temporarily overloaded or reconnecting. Please retry in a few moments.';
+      } else {
+        errorCode = 'BACKEND_ERROR';
+        errorMsg = errorBody?.error || `JIVEXA backend error (${response.status}). Please try again.`;
+      }
+
+      onChunk(errorMsg, 'JIVEXA Error Notice', false);
+      return {
+        text: errorMsg,
+        isEmergency: false,
+        suggestions: [],
+        disclaimer: 'System status notice.',
+        provider: 'JIVEXA Error Notice',
+        errorCode
+      };
+    }
+
+    if (response.body) {
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let fullText = '';
       let doneReading = false;
       let buffer = '';
+      let isEmergencyStream = false;
+      let responseProvider = 'JIVEXA AI (Google Gemini)';
+      let streamSuggestions: string[] = [];
+      let streamErrorCode: string | undefined;
 
       while (!doneReading) {
         const { value, done } = await reader.read();
@@ -559,11 +606,30 @@ export const streamAIHealthAssistant = async (
           if (trimmed.startsWith('data: ')) {
             try {
               const data = JSON.parse(trimmed.replace('data: ', ''));
+              if (data.isEmergency) {
+                isEmergencyStream = true;
+              }
+              if (data.provider) {
+                responseProvider = data.provider;
+              }
               if (data.chunk) {
                 fullText += data.chunk;
-                onChunk(data.chunk, 'JIVEXA AI (Google Gemini)', false);
+                onChunk(data.chunk, responseProvider, isEmergencyStream);
+              }
+              if (data.suggestions && Array.isArray(data.suggestions)) {
+                streamSuggestions = data.suggestions;
+              }
+              if (data.errorCode) {
+                streamErrorCode = data.errorCode;
+              }
+              if (data.error && !data.chunk) {
+                fullText += data.error;
+                onChunk(data.error, responseProvider, isEmergencyStream);
               }
               if (data.done) {
+                if (data.isEmergency) {
+                  isEmergencyStream = true;
+                }
                 doneReading = true;
               }
             } catch (e) {}
@@ -574,21 +640,39 @@ export const streamAIHealthAssistant = async (
       if (fullText.trim()) {
         return {
           text: fullText,
-          isEmergency: false,
-          suggestions: [],
+          isEmergency: isEmergencyStream,
+          suggestions: streamErrorCode ? [] : streamSuggestions,
           disclaimer: '',
-          provider: 'JIVEXA AI (Google Gemini)'
+          provider: responseProvider,
+          errorCode: streamErrorCode
         };
       }
     }
-  } catch (backendErr) {
-    console.warn('[JIVEXA AI] Backend stream error, falling back to local assistant engine:', backendErr);
+  } catch (backendErr: any) {
+    console.error('[JIVEXA AI] Network / Backend connection error:', backendErr);
+    const networkMsg = `Cannot connect to the JIVEXA backend service (${getApiBaseUrl()}). Please ensure the backend server is running on http://localhost:4000 and try again.`;
+    onChunk(networkMsg, 'JIVEXA Connection Notice', false);
+    return {
+      text: networkMsg,
+      isEmergency: false,
+      suggestions: [],
+      disclaimer: 'Connection status notice.',
+      provider: 'JIVEXA Connection Notice',
+      errorCode: 'NETWORK_DISCONNECTED'
+    };
   }
 
-  // 6. Local Assistant Fallback Engine (No generic fake clinical diagrams)
-  const localRes = await askAIHealthAssistant(query);
-  onChunk(localRes.text, 'JIVEXA Health AI', localRes.isEmergency);
-  return localRes;
+  // Safe fallback when stream yields empty content without error
+  const emptyFallback = 'JIVEXA AI completed the request without generating content. Please try rephrasing your question.';
+  onChunk(emptyFallback, 'JIVEXA Health AI', false);
+  return {
+    text: emptyFallback,
+    isEmergency: false,
+    suggestions: [],
+    disclaimer: '',
+    provider: 'JIVEXA Health AI',
+    errorCode: 'EMPTY_RESPONSE'
+  };
 };
 
 /**
@@ -631,6 +715,22 @@ export const askAIHealthAssistant = async (query: string): Promise<AIResponse> =
   await new Promise((resolve) => setTimeout(resolve, 200));
 
   const q = query.toLowerCase().trim();
+
+  // Refusal for off-topic non-health queries (programming, math, entertainment)
+  const nonHealthKeywords = [
+    'python', 'javascript', 'java', 'c++', 'array', 'algorithm', 'sorting',
+    'recursion', 'programming', 'coding', 'calculus', 'integral', 'bitcoin',
+    'crypto', 'fifa', 'movie review'
+  ];
+  if (nonHealthKeywords.some((kw) => q.includes(kw))) {
+    return {
+      isEmergency: false,
+      text: "I'm Jivexa Health AI. I can help with health, medical information, wellness, and healthcare services. Please ask me a health-related question.",
+      suggestions: [],
+      disclaimer: 'JIVEXA Health Guardrail',
+      provider: 'JIVEXA Health Guardrail'
+    };
+  }
 
   // Natural responses for conversational queries when offline
   if (isConversationalQuery(q)) {

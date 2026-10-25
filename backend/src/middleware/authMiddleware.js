@@ -1,8 +1,9 @@
+const config = require('../config/env');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { isDatabaseConnected } = require('../config/db');
 
-const JWT_FALLBACK_SECRET = 'jivexa_health_jwt_secret_key_2026_super_secure_auth_token_string';
+const JWT_FALLBACK_SECRET = config.auth.jwtSecret;
 
 const protect = async (req, res, next) => {
   let token;
@@ -25,7 +26,7 @@ const protect = async (req, res, next) => {
   }
 
   try {
-    const secretKey = process.env.JWT_SECRET || JWT_FALLBACK_SECRET;
+    const secretKey = config.auth.jwtSecret;
     const decoded = jwt.verify(token, secretKey);
 
     if (!decoded || (!decoded.id && !decoded.email)) {
@@ -80,7 +81,7 @@ const optionalProtect = async (req, res, next) => {
   }
 
   try {
-    const secretKey = process.env.JWT_SECRET || JWT_FALLBACK_SECRET;
+    const secretKey = config.auth.jwtSecret;
     const decoded = jwt.verify(token, secretKey);
 
     if (!decoded || (!decoded.id && !decoded.email)) {

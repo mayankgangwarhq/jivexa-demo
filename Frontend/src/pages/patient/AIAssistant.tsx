@@ -23,6 +23,8 @@ interface ChatMessage {
   isEmergency?: boolean;
   provider?: string;
   isStreaming?: boolean;
+  suggestions?: string[];
+  errorCode?: string;
 }
 
 interface Conversation {
@@ -224,7 +226,7 @@ export const AIAssistantChat: React.FC = () => {
         .filter(m => m.id !== userMsg.id && typeof m.text === 'string' && m.text.trim().length > 0)
         .map(m => ({ sender: m.sender, text: m.text.trim() }));
 
-      await streamAIHealthAssistant(
+      const responseResult = await streamAIHealthAssistant(
         textToSend,
         cleanHistory,
         (chunk, provider, isEmerg) => {
@@ -269,11 +271,13 @@ export const AIAssistantChat: React.FC = () => {
       const finalAiMsg: ChatMessage = {
         id: aiMsgId,
         sender: 'ai',
-        text: streamingText || 'JIVEXA Assistant provided no response.',
+        text: streamingText || responseResult?.text || 'JIVEXA Assistant provided no response.',
         timestamp: new Date(),
         provider: currentProvider,
         isEmergency: isEmergencyFlag,
-        isStreaming: false
+        isStreaming: false,
+        suggestions: responseResult?.errorCode ? [] : (responseResult?.suggestions || []),
+        errorCode: responseResult?.errorCode
       };
 
       setConversations((prev) => {
@@ -299,10 +303,12 @@ export const AIAssistantChat: React.FC = () => {
       const errorAiMsg: ChatMessage = {
         id: aiMsgId,
         sender: 'ai',
-        text: streamingText || 'JIVEXA Assistant is temporarily unavailable. Please verify your connection and try again.',
+        text: streamingText || 'JIVEXA Assistant is temporarily unable to connect to the backend server. Please verify the backend is running and try again.',
         timestamp: new Date(),
         provider: currentProvider,
-        isStreaming: false
+        isStreaming: false,
+        suggestions: [],
+        errorCode: 'NETWORK_ERROR'
       };
 
       setConversations((prev) => {
@@ -745,6 +751,26 @@ export const AIAssistantChat: React.FC = () => {
                             {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </div>
 
+                          {!isUser && msg.errorCode && !isLoading && (
+                            <div className="chat-error-actions">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const convMsgs = activeConv.messages;
+                                  const currentIdx = convMsgs.findIndex(m => m.id === msg.id);
+                                  const lastUser = currentIdx > 0 ? convMsgs[currentIdx - 1] : null;
+                                  if (lastUser && lastUser.sender === 'user') {
+                                    handleSendMessage(lastUser.text);
+                                  }
+                                }}
+                                className="chat-retry-pill-btn"
+                              >
+                                <RefreshCw size={13} className="retry-btn-icon" />
+                                <span>Retry Question</span>
+                              </button>
+                            </div>
+                          )}
+
                         </div>
 
                       </div>
@@ -764,33 +790,53 @@ export const AIAssistantChat: React.FC = () => {
             const lastUserMsg = [...activeConv.messages].reverse().find(m => m.sender === 'user');
             if (lastAiMsg.sender !== 'ai' || !lastUserMsg) return null;
             
+            // If the latest message had an error, DO NOT SHOW SUGGESTIONS!
+            if (lastAiMsg.errorCode) return null;
+
             const userText = lastUserMsg.text.toLowerCase().trim();
             const casualKeywords = [
               'hi', 'hello', 'hey', 'namaste', 'naam', 'name', 'who', 'kaun',
               'kaise', 'how are you', 'thank', 'dhanyawad', 'shukriya', 'bye', 'ok', 'okay', 'yes', 'no'
             ];
             const isCasual = casualKeywords.some(k => userText.includes(k));
-
             if (isCasual) return null;
 
+            // Use the context-aware suggestions predicted for this response
+            const displaySuggestions = (Array.isArray(lastAiMsg.suggestions) && lastAiMsg.suggestions.length > 0)
+              ? lastAiMsg.suggestions
+              : [];
+
+            if (displaySuggestions.length === 0) return null;
+
             return (
-              <div className="followup-prompts-bar">
-                {[
-                  'What questions should I ask my doctor?',
-                  'Explain key reference ranges for this condition.',
-                  'What lifestyle and diet modifications help?',
-                  'When is follow-up medical care necessary?'
-                ].map((q, idx) => (
-                  <button 
-                    key={idx}
-                    type="button"
-                    onClick={() => handleSendMessage(q)}
-                    className="followup-prompt-chip"
-                  >
-                    <Sparkles size={12} className="chip-sparkle" />
-                    <span>{q}</span>
-                  </button>
-                ))}
+              <div className="followup-prompts-bar" role="region" aria-label="Suggested follow-up questions">
+                <span className="followup-prompts-label">
+                  <Sparkles size={12} style={{ color: '#059669' }} />
+                  Suggested follow-up questions:
+                </span>
+                <div className="followup-chips-container">
+                  {displaySuggestions.map((q, idx) => (
+                    <button 
+                      key={idx}
+                      type="button"
+                      data-prompt={q}
+                      aria-label={q}
+                      title={q}
+                      disabled={isLoading}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (!isLoading) {
+                          handleSendMessage(q);
+                        }
+                      }}
+                      className="followup-prompt-chip"
+                    >
+                      <Sparkles size={12} className="chip-sparkle" />
+                      <span>{q}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             );
           })()}
@@ -1917,11 +1963,28 @@ export const AIAssistantChat: React.FC = () => {
         .followup-prompts-bar {
           padding: 8px 24px 10px 24px;
           display: flex;
+          flex-direction: column;
+          gap: 8px;
+          background: #f8fafc;
+          border-top: 1px solid #f1f5f9;
+        }
+
+        .followup-prompts-label {
+          font-size: 0.72rem;
+          font-weight: 700;
+          color: #64748b;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .followup-chips-container {
+          display: flex;
           gap: 10px;
           flex-wrap: wrap;
           align-items: center;
-          background: #f8fafc;
-          border-top: 1px solid #f1f5f9;
         }
 
         .followup-prompt-chip {
@@ -1946,6 +2009,43 @@ export const AIAssistantChat: React.FC = () => {
           border-color: #6ee7b7;
           transform: translateY(-1px);
           box-shadow: 0 2px 4px rgba(16, 185, 129, 0.12);
+        }
+
+        .followup-prompt-chip:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          transform: none;
+        }
+
+        .chat-error-actions {
+          margin-top: 8px;
+          display: flex;
+          align-items: center;
+        }
+
+        .chat-retry-pill-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 12px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: #dc2626;
+          background: #fef2f2;
+          border: 1px solid #fecaca;
+          border-radius: 9999px;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .chat-retry-pill-btn:hover {
+          background: #fee2e2;
+          border-color: #fca5a5;
+          transform: translateY(-1px);
+        }
+
+        .retry-btn-icon {
+          color: #dc2626;
         }
 
         .chip-sparkle {

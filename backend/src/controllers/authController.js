@@ -1,3 +1,4 @@
+const config = require('../config/env');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { MongoDb } = require('../services/mongoDbService');
@@ -13,7 +14,7 @@ const {
   OTP_RESEND_COOLDOWN_SECONDS 
 } = require('../services/otpService');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'jivexa_health_jwt_secret_key_2026_super_secure_auth_token_string';
+const JWT_SECRET = config.auth.jwtSecret;
 const MAX_FAILED_LOGINS = 5;
 const LOCK_TIME_MS = 15 * 60 * 1000; // 15-minute lockout
 
@@ -26,12 +27,12 @@ const generateCanonicalHealthId = () => {
 // TEMPORARILY DISABLED FOR LAUNCH
 // Re-enable OTP after launch by setting OTP_ENABLED=true in backend/.env.
 const isOtpEnabled = () => {
-  return process.env.OTP_ENABLED === 'true';
+  return config.auth.otpEnabled;
 };
 
 // Helper to generate signed JWT token
 const generateToken = (id, email, role, name, roleId) => {
-  const secretKey = process.env.JWT_SECRET || JWT_SECRET;
+  const secretKey = config.auth.jwtSecret;
   if (!secretKey) {
     throw new Error('JWT secret key is not configured in backend environment');
   }
@@ -45,8 +46,8 @@ const generateToken = (id, email, role, name, roleId) => {
 // Cookie configuration options
 const getCookieOptions = () => ({
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+  secure: config.server.isProduction,
+  sameSite: config.server.isProduction ? 'none' : 'lax',
   maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
 });
 
@@ -169,6 +170,13 @@ const registerUser = async (req, res) => {
       user: userRecord.toAuthJSON ? userRecord.toAuthJSON() : userRecord
     });
   } catch (error) {
+    if (error.code === 11000 || (error.name === 'MongoServerError' && error.code === 11000)) {
+      return res.status(409).json({
+        success: false,
+        error: 'An account with this email already exists. Please log in.',
+        message: 'An account with this email already exists. Please log in.'
+      });
+    }
     console.error('[Backend Auth Signup Error]:', error);
     return res.status(500).json({
       success: false,
@@ -472,8 +480,8 @@ const loginUser = async (req, res) => {
 const logoutUser = async (req, res) => {
   res.clearCookie('token', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    secure: config.server.isProduction,
+    sameSite: config.server.isProduction ? 'none' : 'lax'
   });
   return res.status(200).json({
     success: true,

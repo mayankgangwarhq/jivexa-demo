@@ -1,4 +1,5 @@
 const { MongoDb } = require('../services/mongoDbService');
+const { isDatabaseConnected } = require('../config/db');
 
 // Helper to generate a canonical Health ID: JIV-2026-XXXXXX
 const generateRandomId = () => {
@@ -74,10 +75,11 @@ const generateUniqueHealthId = async () => {
 };
 
 // Helper to format patient emergency profile response
-const formatEmergencyPatientResponse = (record) => ({
+const formatEmergencyPatientResponse = (record, isDemo = false) => ({
   success: true,
+  isDemoRecord: isDemo || Boolean(record.isDemo),
   healthId: record.healthId,
-  verificationStatus: 'Verified Active Record',
+  verificationStatus: isDemo ? 'Sample Demo Record' : 'Verified Active Record',
   patient: {
     name: record.fullName || record.name || null,
     dateOfBirth: record.dateOfBirth || null,
@@ -93,6 +95,9 @@ const formatEmergencyPatientResponse = (record) => ({
 // @route   POST /api/health-id
 // @access  Private (Authenticated Patient)
 const createHealthId = async (req, res) => {
+  if (!isDatabaseConnected()) {
+    return res.status(503).json({ success: false, message: 'Database is currently disconnected. Please configure MONGO_URI.' });
+  }
   try {
     const userId = req.user._id || req.user.id;
     const { dateOfBirth, gender, phoneNumber, bloodGroup, emergencyContact, address, healthProfile } = req.body;
@@ -165,6 +170,9 @@ const createHealthId = async (req, res) => {
 // @route   GET /api/health-id/me
 // @access  Private (Authenticated Patient)
 const getMyHealthId = async (req, res) => {
+  if (!isDatabaseConnected()) {
+    return res.status(503).json({ success: false, message: 'Database is currently disconnected. Please configure MONGO_URI.' });
+  }
   try {
     const userId = req.user._id || req.user.id;
     let record = await MongoDb.healthIds.findOne({ userId });
@@ -233,12 +241,22 @@ const searchHealthId = async (req, res) => {
       });
     }
 
-    let record = await MongoDb.healthIds.findOne({
-      $or: [
-        { healthId: sanitizedHealthId },
-        { healthId: sanitizedHealthId.replace(/[^A-Z0-9]/g, '') }
-      ]
-    });
+    // 1. Check verified demo sample Health IDs first (immediate response without DB dependency)
+    const demoMatch = DEMO_HEALTH_IDS.find(
+      (d) => d.healthId.toUpperCase() === sanitizedHealthId || d.healthId.toUpperCase().replace(/[^A-Z0-9]/g, '') === sanitizedHealthId.replace(/[^A-Z0-9]/g, '')
+    );
+    if (demoMatch) {
+      return res.status(200).json(formatEmergencyPatientResponse(demoMatch, true));
+    }
+
+    let record = null;
+    if (isDatabaseConnected()) {
+      record = await MongoDb.healthIds.findOne({
+        $or: [
+          { healthId: sanitizedHealthId },
+          { healthId: sanitizedHealthId.replace(/[^A-Z0-9]/g, '') }
+        ]
+      });
 
     // 1. Check if patient user has this health_id in users collection
     if (!record) {
@@ -273,12 +291,6 @@ const searchHealthId = async (req, res) => {
       }
     }
 
-    // 2. Demo sample fallback (verified demo Health IDs)
-    if (!record) {
-      const demoMatch = DEMO_HEALTH_IDS.find(
-        (d) => d.healthId.toUpperCase() === sanitizedHealthId || d.healthId.toUpperCase().replace(/[^A-Z0-9]/g, '') === sanitizedHealthId.replace(/[^A-Z0-9]/g, '')
-      );
-      if (demoMatch) record = demoMatch;
     }
 
     if (!record) {

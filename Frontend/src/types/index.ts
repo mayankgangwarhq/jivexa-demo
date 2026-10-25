@@ -126,7 +126,15 @@ export interface ReportParameter {
   value: string;
   referenceRange: string;
   unit?: string;
-  status: 'Normal' | 'Abnormal' | 'Attention';
+  numericValue?: number | null;
+  refMin?: number | null;
+  refMax?: number | null;
+  status: 'Normal' | 'Abnormal' | 'Attention' | 'Within Reference Range' | 'Above Range' | 'Below Range' | 'Needs Review';
+  flag?: 'NORMAL' | 'HIGH' | 'LOW' | 'NEEDS_REVIEW';
+  category?: string;
+  isVerified?: boolean;
+  sourcePage?: number;
+  reportDate?: string;
   simpleExplanation: string;
 }
 
@@ -134,12 +142,40 @@ export interface AIReportAnalysisResult {
   id: string;
   reportId: string;
   reportTitle: string;
-  healthScore: number; // 0 - 100
-  scoreStatus: 'Optimal' | 'Requires Attention' | 'Needs Review';
+  reportDate?: string;
+  healthScore: number | null; // 0 - 100 or null when unanalyzed or insufficient data
+  scoreStatus: string;
+  scoreFormula?: string;
+  scoreMethodology?: string;
+  dataCompleteness?: {
+    analyzed: number;
+    expected: number;
+    percentage: number;
+    statusText: string;
+  };
+  summaryCounts?: {
+    total: number;
+    verifiedCount: number;
+    inRange: number;
+    inRangePercent: number;
+    aboveRange: number;
+    aboveRangePercent: number;
+    belowRange: number;
+    belowRangePercent: number;
+    needsReview: number;
+    needsReviewPercent: number;
+  };
+  aiStatus?: string;
+  extractionStatus?: string;
   summary: string;
+  parameters?: ReportParameter[];
   normalFindings: ReportParameter[];
   abnormalFindings: ReportParameter[];
   attentionParameters: ReportParameter[];
+  withinRange?: ReportParameter[];
+  aboveRange?: ReportParameter[];
+  belowRange?: ReportParameter[];
+  needsReview?: ReportParameter[];
   possibleFactors: string[];
   questionsForDoctor: string[];
   lifestyleSuggestions: string[];

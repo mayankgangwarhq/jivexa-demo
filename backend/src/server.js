@@ -1,5 +1,5 @@
-const dotenv = require('dotenv');
-dotenv.config();
+const config = require('./config/env');
+config.validateEnv();
 
 const express = require('express');
 const cors = require('cors');
@@ -8,6 +8,9 @@ const cookieParser = require('cookie-parser');
 const { connectDB, isMongoConfigured, checkDatabaseHealth } = require('./config/db');
 
 const app = express();
+
+// Trust proxy for secure cookies and reverse proxies (Render, Cloudflare, Vercel)
+app.set('trust proxy', 1);
 
 // Configure CORS for Cookie & Authorization header transmission across any deployed origin
 const corsOptions = {
@@ -65,16 +68,13 @@ app.get('/api/health', async (req, res) => {
       ? 'MongoDB Atlas'
       : (isMongo ? 'MongoDB Atlas (Unreachable)' : 'DISCONNECTED'),
     authProvider: 'Native JWT / MongoDB Auth',
-    // TEMPORARILY DISABLED FOR LAUNCH
-    // Re-enable OTP after launch by setting OTP_ENABLED=true in backend/.env.
     otp: {
-      enabled: process.env.OTP_ENABLED === 'true',
-      status: process.env.OTP_ENABLED === 'true' ? 'ACTIVE' : 'TEMPORARILY_DISABLED_FOR_LAUNCH'
+      enabled: config.auth.otpEnabled,
+      status: config.auth.otpEnabled ? 'ACTIVE' : 'TEMPORARILY_DISABLED_FOR_LAUNCH'
     },
-    // PATIENT-FIRST MVP LAUNCH MODE
     mvpMode: {
-      patientMvpOnly: process.env.PATIENT_MVP_ONLY === 'true',
-      mode: process.env.PATIENT_MVP_ONLY === 'true' ? 'PATIENT_FIRST_MVP' : 'FULL_ECOSYSTEM',
+      patientMvpOnly: config.auth.patientMvpOnly,
+      mode: config.auth.patientMvpOnly ? 'PATIENT_FIRST_MVP' : 'FULL_ECOSYSTEM',
       activeModules: [
         'PATIENT_SIGNUP',
         'PATIENT_LOGIN',
@@ -116,28 +116,28 @@ process.on('uncaughtException', (err) => {
   console.error('[Process] Handled uncaught exception safely:', err.message);
 });
 
-const PORT = parseInt(process.env.PORT, 10) || 4000;
-const HOST = process.env.HOST || '0.0.0.0';
+const PORT = config.server.port;
+const HOST = config.server.host;
 
 const startServer = async () => {
   try {
-    // 1. Connect to MongoDB Atlas
+    // 1. Connect to MongoDB Atlas if configured
     if (isMongoConfigured()) {
-      console.log('[MongoDB] URI detected in backend environment. Connecting to MongoDB Atlas...');
+      console.log(`[MongoDB] URI detected (${config.db.getMaskedUri()}). Connecting to MongoDB Atlas...`);
       try {
         await connectDB();
       } catch (err) {
         console.warn('[MongoDB] Initial connection error on startup:', err.message);
       }
     } else {
-      console.warn('[MongoDB] MONGO_URI is not set in backend/.env. Server will run in degraded mode until configured.');
+      console.warn('[MongoDB] MONGO_URI is not set in backend/.env. Server running in degraded mode.');
     }
 
     // 2. Start Express server and attach error listeners explicitly on 0.0.0.0
     const server = app.listen(PORT, HOST, () => {
       console.log(
         `[JIVEXA Backend] Production-Grade Auth Server running in ${
-          process.env.NODE_ENV || 'development'
+          config.server.nodeEnv
         } mode on http://localhost:${PORT} (bound to ${HOST}:${PORT})`
       );
     });

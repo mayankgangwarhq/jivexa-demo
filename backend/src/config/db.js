@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const config = require('./env');
 
 let isConnecting = false;
 let connectionError = null;
@@ -7,10 +8,7 @@ let connectionError = null;
  * Validate MongoDB URI format and ensure no empty or placeholder strings
  */
 const isMongoConfigured = () => {
-  const uri = process.env.MONGO_URI ? process.env.MONGO_URI.trim() : '';
-  if (!uri) return false;
-  if (uri.includes('<username>') || uri.includes('<password>') || uri.includes('<cluster>')) return false;
-  return uri.startsWith('mongodb://') || uri.startsWith('mongodb+srv://');
+  return config.db.isConfigured();
 };
 
 /**
@@ -28,11 +26,11 @@ const connectDB = async () => {
     return null;
   }
 
-  const mongoUri = process.env.MONGO_URI ? process.env.MONGO_URI.trim() : '';
+  const mongoUri = config.db.mongoUri;
 
-  if (!mongoUri || !isMongoConfigured()) {
+  if (!mongoUri || !config.db.isConfigured()) {
     connectionError = 'MONGO_URI is not configured or contains placeholder credentials';
-    console.warn(`[MongoDB Warning] ${connectionError}. Please set a valid MONGO_URI in .env`);
+    console.warn(`[MongoDB Warning] ${connectionError}. Please set a valid MONGO_URI in backend/.env`);
     return null;
   }
 
@@ -44,14 +42,12 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 5000,
       connectTimeoutMS: 10000,
       socketTimeoutMS: 45000,
-      autoIndex: process.env.NODE_ENV !== 'production'
+      autoIndex: !config.server.isProduction
     });
 
     isConnecting = false;
     connectionError = null;
-    // Mask URI for safe logging - never expose credentials
-    const maskedUri = mongoUri.replace(/\/\/[^:]+:[^@]+@/, '//***:***@');
-    console.log(`[MongoDB Connected] Host: ${conn.connection.host} | DB: ${conn.connection.name} (${maskedUri})`);
+    console.log(`[MongoDB Connected] Host: ${conn.connection.host} | DB: ${conn.connection.name} (${config.db.getMaskedUri()})`);
 
     return conn.connection;
   } catch (error) {
@@ -74,7 +70,7 @@ const isDatabaseConnected = () => {
  * Never reports success if connection has failed or is disconnected.
  */
 const checkDatabaseHealth = async () => {
-  const configured = isMongoConfigured();
+  const configured = config.db.isConfigured();
   const readyState = mongoose.connection.readyState;
 
   if (!configured) {
@@ -154,4 +150,3 @@ module.exports = {
   isDatabaseConnected,
   checkDatabaseHealth
 };
-

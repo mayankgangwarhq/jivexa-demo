@@ -4,13 +4,16 @@ const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const authRoutes = require('./src/routes/authRoutes');
-const { connectDB, isMongoConfigured, checkDatabaseHealth } = require('./src/config/db');
+const aiRoutes = require('./src/routes/aiRoutes');
+const healthIdRoutes = require('./src/routes/healthIdRoutes');
+const { connectDB, isMongoConfigured, isDatabaseConnected, checkDatabaseHealth } = require('./src/config/db');
 const User = require('./src/models/User');
 const HealthId = require('./src/models/HealthId');
+const { STANDARD_REFUSAL_MESSAGE } = require('./src/services/healthGuardrail');
 
 const runTests = async () => {
   console.log('\n======================================================');
-  console.log('🚀 JIVEXA HEALTH - MONGODB ATLAS BACKEND TEST SUITE');
+  console.log('🚀 JIVEXA HEALTH - MONGODB ATLAS & API TEST SUITE');
   console.log('======================================================\n');
 
   let server;
@@ -23,7 +26,11 @@ const runTests = async () => {
       console.log('ℹ️ MONGO_URI detected, connecting to MongoDB Atlas...');
       try {
         await connectDB();
-        console.log('✅ Connected to MongoDB Atlas successfully.');
+        if (isDatabaseConnected()) {
+          console.log('✅ Connected to MongoDB Atlas successfully.');
+        } else {
+          console.warn('⚠️ Warning: MongoDB Atlas connection attempt failed (cluster host unreachable).');
+        }
       } catch (connErr) {
         console.warn('⚠️ Warning: MongoDB Atlas connection attempt failed:', connErr.message);
       }
@@ -44,11 +51,13 @@ const runTests = async () => {
       })
     );
 
-    app.use(express.json());
+    app.use(express.json({ limit: '10mb' }));
     app.use(cookieParser());
 
     app.use('/api/auth', authRoutes);
     app.use('/user', authRoutes);
+    app.use('/api/ai', aiRoutes);
+    app.use('/api/health-id', healthIdRoutes);
 
     app.get('/api/health', async (req, res) => {
       const dbStatus = await checkDatabaseHealth();
@@ -75,8 +84,62 @@ const runTests = async () => {
       const res = await fetch(`${BASE_URL}/api/health`);
       const body = await res.json();
       const pass = res.status === 200 && body.database === 'MongoDB Atlas';
-      console.log(`[TEST 1] /api/health -> Status: ${res.status} | DB: ${body.database} | Active: ${body.activeDatabase} | Pass: ${pass}`);
+      console.log(`[TEST 1] /api/health -> Status: ${res.status} | DB: ${body.database} | Target: ${body.activeDatabase} | Pass: ${pass}`);
       testResults.push({ name: 'Health Check (MongoDB Atlas Target)', pass, status: res.status });
+    }
+
+    // TEST 2: Health ID Search Endpoint (Demo Record Lookup)
+    {
+      const res = await fetch(`${BASE_URL}/api/health-id/search?healthId=JXV-STVAZREW`);
+      const body = await res.json();
+      const pass = res.status === 200 && body.success === true && body.patient?.name === 'Aarav Sharma';
+      console.log(`[TEST 2] Health ID Search -> Status: ${res.status} | Patient: ${body.patient?.name} | Demo Flag: ${body.isDemoRecord} | Pass: ${pass}`);
+      testResults.push({ name: 'Health ID Search (Demo Record)', pass, status: res.status });
+    }
+
+    // TEST 3: AI Chat Health-Only Refusal ("Explain Python arrays") over HTTP SSE
+    {
+      const res = await fetch(`${BASE_URL}/api/ai/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Explain Python arrays' })
+      });
+      const text = await res.text();
+      const pass = res.status === 200 && text.includes(STANDARD_REFUSAL_MESSAGE);
+      console.log(`[TEST 3] AI Chat Refusal ("Explain Python arrays") -> Status: ${res.status} | Contains Refusal: ${text.includes(STANDARD_REFUSAL_MESSAGE)} | Pass: ${pass}`);
+      testResults.push({ name: 'AI Health-Only Guardrail Refusal over HTTP', pass, status: res.status });
+    }
+
+    // TEST 4: AI Chat Oversized Input Guardrail (> 10,000 characters)
+    {
+      const oversizedMessage = 'a'.repeat(12000);
+      const res = await fetch(`${BASE_URL}/api/ai/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: oversizedMessage })
+      });
+      const body = await res.json();
+      const pass = res.status === 400 && body.oversized === true;
+      console.log(`[TEST 4] AI Oversized Input (> 10,000 chars) -> Status: ${res.status} | Rejected: ${body.oversized} | Pass: ${pass}`);
+      testResults.push({ name: 'AI Oversized Input Guardrail', pass, status: res.status });
+    }
+
+    // TEST 5: Input Validation Guardrail on Auth Registration (Zod Schema)
+    {
+      const invalidUser = {
+        name: 'A', // Too short (min 2)
+        email: 'not-an-email',
+        password: 'weak' // Weak password
+      };
+      const res = await fetch(`${BASE_URL}/user/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(invalidUser)
+      });
+      const body = await res.json();
+      const pass = res.status === 400 && body.success === false && Boolean(body.error);
+      console.log(`[TEST 5] Zod Auth Input Validation -> Status: ${res.status} | Rejected invalid input: ${body.error} | Pass: ${pass}`);
+      testResults.push({ name: 'Zod Auth Input Validation', pass, status: res.status });
     }
 
     if (isMongo && (await checkDatabaseHealth()).connected) {
@@ -91,7 +154,7 @@ const runTests = async () => {
 
       let userToken = '';
 
-      // TEST 2: Registration
+      // TEST 6: Registration
       {
         const res = await fetch(`${BASE_URL}/user/signup`, {
           method: 'POST',
@@ -101,11 +164,11 @@ const runTests = async () => {
         const body = await res.json();
         userToken = body.token;
         const pass = res.status === 201 && body.success === true && Boolean(body.token) && body.user?.email === testUser.email;
-        console.log(`[TEST 2] Registration -> Status: ${res.status} | Token: ${body.token ? 'Issued' : 'Missing'} | Pass: ${pass}`);
+        console.log(`[TEST 6] Live Registration -> Status: ${res.status} | Token: ${body.token ? 'Issued' : 'Missing'} | Pass: ${pass}`);
         testResults.push({ name: 'Registration', pass, status: res.status });
       }
 
-      // TEST 3: Duplicate Email (409)
+      // TEST 7: Duplicate Email (409)
       {
         const res = await fetch(`${BASE_URL}/user/signup`, {
           method: 'POST',
@@ -114,11 +177,11 @@ const runTests = async () => {
         });
         const body = await res.json();
         const pass = res.status === 409 && body.success === false;
-        console.log(`[TEST 3] Duplicate Registration -> Status: ${res.status} | Pass: ${pass}`);
+        console.log(`[TEST 7] Duplicate Registration -> Status: ${res.status} | Pass: ${pass}`);
         testResults.push({ name: 'Duplicate Registration', pass, status: res.status });
       }
 
-      // TEST 4: Login with Valid Password (200)
+      // TEST 8: Login with Valid Password (200)
       {
         const res = await fetch(`${BASE_URL}/user/login`, {
           method: 'POST',
@@ -131,11 +194,11 @@ const runTests = async () => {
         const body = await res.json();
         if (body.token) userToken = body.token;
         const pass = res.status === 200 && body.success === true && Boolean(body.token) && body.user?.email === testUser.email;
-        console.log(`[TEST 4] Login -> Status: ${res.status} | Token: ${body.token ? 'Issued' : 'Missing'} | Pass: ${pass}`);
+        console.log(`[TEST 8] Live Login -> Status: ${res.status} | Token: ${body.token ? 'Issued' : 'Missing'} | Pass: ${pass}`);
         testResults.push({ name: 'Valid Login', pass, status: res.status });
       }
 
-      // TEST 5: Login with Wrong Password (401)
+      // TEST 9: Login with Wrong Password (401)
       {
         const res = await fetch(`${BASE_URL}/user/login`, {
           method: 'POST',
@@ -147,11 +210,11 @@ const runTests = async () => {
         });
         const body = await res.json();
         const pass = res.status === 401 && body.success === false;
-        console.log(`[TEST 5] Wrong Password -> Status: ${res.status} | Pass: ${pass}`);
+        console.log(`[TEST 9] Wrong Password -> Status: ${res.status} | Pass: ${pass}`);
         testResults.push({ name: 'Wrong Password', pass, status: res.status });
       }
 
-      // TEST 6: Protected Route (GET /user/me)
+      // TEST 10: Protected Route (GET /user/me)
       {
         const res = await fetch(`${BASE_URL}/user/me`, {
           method: 'GET',
@@ -162,7 +225,7 @@ const runTests = async () => {
         });
         const body = await res.json();
         const pass = res.status === 200 && body.success === true && body.user?.email === testUser.email;
-        console.log(`[TEST 6] Protected Route -> Status: ${res.status} | User: ${body.user?.name} | Pass: ${pass}`);
+        console.log(`[TEST 10] Protected Route -> Status: ${res.status} | User: ${body.user?.name} | Pass: ${pass}`);
         testResults.push({ name: 'Protected Route', pass, status: res.status });
       }
 
@@ -176,7 +239,7 @@ const runTests = async () => {
       }
     } else {
       console.log('ℹ️ Live MongoDB Atlas connection skipped until MONGO_URI is configured by the user.');
-      console.log('ℹ️ Health endpoint and Mongoose architecture verified successfully.');
+      console.log('ℹ️ Health endpoint, schema validations, and API routes verified successfully.');
     }
 
     console.log('\n======================================================');
@@ -185,11 +248,13 @@ const runTests = async () => {
     console.log('======================================================\n');
 
     if (!allPassed) process.exit(1);
+    process.exit(0);
   } catch (e) {
     console.error('❌ Backend test error:', e);
     process.exit(1);
   } finally {
     if (server) server.close();
+    try { await mongoose.disconnect(); } catch (e) {}
   }
 };
 

@@ -7,6 +7,9 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node test-backend-suite.js",
+    "test:ai": "node test-gemini-suite.js",
+    "test:guardrail": "node test-guardrail.js",
+    "test:all": "node test-backend-suite.js && node test-gemini-suite.js",
     "migrate:mongo": "node scripts/migrate-supabase-to-mongo.js"
   },
   "dependencies": {
@@ -21,6 +24,7 @@
     "mongoose": "^9.11.2",
     "nodemailer": "^9.0.5",
     "openai": "^7.5.0",
+    "pako": "^3.0.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {

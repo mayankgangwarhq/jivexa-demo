@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const config = require('../config/env');
 
 /**
  * Native Email Verification & Notification Service
@@ -11,23 +12,23 @@ const resendVerificationEmail = async (email) => {
   }
 
   try {
-    const frontendBase = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendBase = config.server.frontendUrl || 'http://localhost:5173';
     const redirectUrl = `${frontendBase.replace(/\/$/, '')}/#/login?verified=true`;
 
     // If SMTP credentials configured, send real email via nodemailer
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    if (config.smtp.isConfigured()) {
       const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'smtp.gmail.com',
-        port: parseInt(process.env.SMTP_PORT, 10) || 587,
-        secure: process.env.SMTP_SECURE === 'true',
+        host: config.smtp.host,
+        port: config.smtp.port,
+        secure: config.smtp.secure,
         auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS
+          user: config.smtp.user,
+          pass: config.smtp.pass
         }
       });
 
       await transporter.sendMail({
-        from: process.env.SMTP_FROM || `"JIVEXA Health" <${process.env.SMTP_USER}>`,
+        from: config.smtp.from || `"JIVEXA Health" <${config.smtp.user}>`,
         to: cleanEmail,
         subject: 'Verify your JIVEXA Health Account',
         html: `
