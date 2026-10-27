@@ -6,6 +6,7 @@ const PharmacyOrder = require('../models/PharmacyOrder');
 const AmbulanceRequest = require('../models/AmbulanceRequest');
 const Conversation = require('../models/Conversation');
 const MedicalReport = require('../models/MedicalReport');
+const Session = require('../models/Session');
 const {
   connectDB,
   disconnectDB,
@@ -301,6 +302,37 @@ const MongoDb = {
       if (patientId) query.patientId = String(patientId);
       const res = await MedicalReport.deleteOne(query);
       return res.deletedCount > 0;
+    }
+  },
+
+  // --- SESSIONS ---
+  sessions: {
+    async create(data) {
+      const payload = { ...data };
+      if (payload.id && !payload._id) {
+        payload._id = String(payload.id);
+      }
+      return await Session.create(payload);
+    },
+
+    async findOne(filter = {}) {
+      return await Session.findOne(filter);
+    },
+
+    async find(filter = {}, sort = { lastActive: -1 }) {
+      return await Session.find(filter).sort(sort);
+    },
+
+    async updateOne(filter = {}, update = {}) {
+      return await Session.updateOne(filter, update);
+    },
+
+    async updateMany(filter = {}, update = {}) {
+      return await Session.updateMany(filter, update);
+    },
+
+    async deleteOne(filter = {}) {
+      return await Session.deleteOne(filter);
     }
   }
 };

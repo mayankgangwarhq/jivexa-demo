@@ -1,6 +1,7 @@
 const config = require('../config/env');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { MongoDb } = require('../services/mongoDbService');
 const { isDatabaseConnected } = require('../config/db');
 const JWT_FALLBACK_SECRET = config.auth.jwtSecret;
 
@@ -53,6 +54,29 @@ const protect = async (req, res, next) => {
         success: false,
         message: 'User associated with this token no longer exists'
       });
+    }
+
+    // Server-side Session Revocation & Expiration Check
+    if (decoded.sessionId && isDatabaseConnected()) {
+      const session = await MongoDb.sessions.findOne({ sessionId: decoded.sessionId });
+      if (session) {
+        if (session.isRevoked) {
+          return res.status(401).json({
+            success: false,
+            message: 'Authentication session has been revoked. Please login again.',
+            error: 'SESSION_REVOKED'
+          });
+        }
+        // Throttled lastActive update (if more than 5 minutes have elapsed)
+        const fiveMinsAgo = Date.now() - 5 * 60 * 1000;
+        if (!session.lastActive || new Date(session.lastActive).getTime() < fiveMinsAgo) {
+          session.lastActive = new Date();
+          await session.save().catch(() => {});
+        }
+      }
+      req.currentSessionId = decoded.sessionId;
+    } else {
+      req.currentSessionId = decoded.sessionId || null;
     }
 
     req.user = user;

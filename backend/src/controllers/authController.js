@@ -1,9 +1,10 @@
 const config = require('../config/env');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { MongoDb } = require('../services/mongoDbService');
+const { MongoDb, isDatabaseConnected } = require('../services/mongoDbService');
 const User = require('../models/User');
 const HealthId = require('../models/HealthId');
+const { parseUserAgent, getClientIp, getApproximateLocation, formatLastActive } = require('../utils/deviceDetector');
 const { signupSchema, loginSchema, updateProfileSchema } = require('../validators/userValidators');
 const { resendVerificationEmail } = require('../services/emailService');
 const { 
@@ -30,14 +31,56 @@ const isOtpEnabled = () => {
   return config.auth.otpEnabled;
 };
 
-// Helper to generate signed JWT token
-const generateToken = (id, email, role, name, roleId) => {
+// Unique session identifier generator
+const generateSessionId = () => {
+  return `sess_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+};
+
+// Record an authenticated login session in MongoDB
+const recordLoginSession = async (user, req) => {
+  try {
+    if (!isDatabaseConnected() || !req) return null;
+    const sessionId = generateSessionId();
+    const ua = (req.headers && req.headers['user-agent']) || '';
+    const parsedUa = parseUserAgent(ua);
+    const ip = getClientIp(req);
+    const location = getApproximateLocation(ip);
+
+    await MongoDb.sessions.create({
+      sessionId,
+      userId: String(user._id || user.id),
+      device: parsedUa.formatted,
+      browser: parsedUa.browser,
+      os: parsedUa.os,
+      deviceType: parsedUa.deviceType,
+      ip,
+      location,
+      userAgent: ua.slice(0, 500),
+      isRevoked: false,
+      createdAt: new Date(),
+      lastActive: new Date(),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    });
+
+    return sessionId;
+  } catch (err) {
+    console.warn('[Session Tracking Notice]: Could not persist login session:', err.message);
+    return null;
+  }
+};
+
+// Helper to generate signed JWT token with optional sessionId binding
+const generateToken = (id, email, role, name, roleId, sessionId = null) => {
   const secretKey = config.auth.jwtSecret;
   if (!secretKey) {
     throw new Error('JWT secret key is not configured in backend environment');
   }
+  const payload = { id, email, role, name, roleId };
+  if (sessionId) {
+    payload.sessionId = sessionId;
+  }
   return jwt.sign(
-    { id, email, role, name, roleId },
+    payload,
     secretKey,
     { expiresIn: '7d' }
   );
@@ -149,13 +192,17 @@ const registerUser = async (req, res) => {
       });
     }
 
-    // 4. Generate JWT auth token & set HTTP-only cookie
+    // 4. Record initial login session for registering device
+    const sessionId = await recordLoginSession(userRecord, req);
+
+    // 5. Generate JWT auth token & set HTTP-only cookie
     const token = generateToken(
       userRecord._id || userRecord.id,
       userRecord.email,
       userRecord.role,
       userRecord.name,
-      userRecord.roleId
+      userRecord.roleId,
+      sessionId
     );
 
     res.cookie('token', token, getCookieOptions());
@@ -165,6 +212,7 @@ const registerUser = async (req, res) => {
       requireEmailConfirmation: false,
       requireOtp: false,
       token,
+      sessionId,
       email,
       message: 'Account created successfully!',
       user: userRecord.toAuthJSON ? userRecord.toAuthJSON() : userRecord
@@ -450,12 +498,16 @@ const loginUser = async (req, res) => {
 
     await user.save();
 
+    // Record authenticated login session
+    const sessionId = await recordLoginSession(user, req);
+
     const token = generateToken(
       user._id || user.id,
       user.email,
       user.role,
       user.name,
-      user.roleId
+      user.roleId,
+      sessionId
     );
 
     res.cookie('token', token, getCookieOptions());
@@ -464,6 +516,7 @@ const loginUser = async (req, res) => {
       success: true,
       message: 'User logged in successfully',
       token,
+      sessionId,
       user: user.toAuthJSON ? user.toAuthJSON() : user
     });
   } catch (error) {
@@ -475,10 +528,20 @@ const loginUser = async (req, res) => {
   }
 };
 
-// @desc    Logout user & clear cookie
+// @desc    Logout user & clear cookie (and revoke current session if present)
 // @route   POST /api/auth/logout
 // @access  Public / Private
 const logoutUser = async (req, res) => {
+  try {
+    const sessionId = req.currentSessionId || req.body?.sessionId;
+    if (sessionId && isDatabaseConnected()) {
+      await MongoDb.sessions.updateOne(
+        { sessionId },
+        { $set: { isRevoked: true, revokedAt: new Date() } }
+      ).catch(() => {});
+    }
+  } catch (_) {}
+
   res.clearCookie('token', {
     httpOnly: true,
     secure: config.server.isProduction,
@@ -488,6 +551,161 @@ const logoutUser = async (req, res) => {
     success: true,
     message: 'User logged out successfully'
   });
+};
+
+// @desc    Get active login sessions for authenticated user
+// @route   GET /api/auth/sessions
+// @access  Private (Authenticated User)
+const getUserSessions = async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized, please login first'
+      });
+    }
+
+    if (!isDatabaseConnected()) {
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        sessions: []
+      });
+    }
+
+    const activeSessions = await MongoDb.sessions.find(
+      { userId: String(userId), isRevoked: false },
+      { lastActive: -1 }
+    );
+
+    const currentSessionId = req.currentSessionId || null;
+
+    const formattedSessions = activeSessions.map((s) => ({
+      id: s.sessionId,
+      device: s.device || 'Unknown Device',
+      location: s.location || 'Location Unavailable',
+      ip: s.ip || 'Unknown IP',
+      lastActive: formatLastActive(s.lastActive),
+      lastActiveAt: s.lastActive,
+      createdAt: s.createdAt,
+      isCurrent: Boolean(currentSessionId && s.sessionId === currentSessionId)
+    }));
+
+    return res.status(200).json({
+      success: true,
+      count: formattedSessions.length,
+      sessions: formattedSessions
+    });
+  } catch (error) {
+    console.error('[Get User Sessions Error]:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to retrieve active login sessions'
+    });
+  }
+};
+
+// @desc    Revoke specific login session
+// @route   POST /api/auth/sessions/:sessionId/revoke, DELETE /api/auth/sessions/:sessionId
+// @access  Private (Authenticated User)
+const revokeSession = async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const { sessionId } = req.params;
+
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID is required'
+      });
+    }
+
+    if (!isDatabaseConnected()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database service is currently unavailable'
+      });
+    }
+
+    const session = await MongoDb.sessions.findOne({ sessionId: String(sessionId).trim() });
+
+    if (!session || String(session.userId) !== String(userId)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Session not found or does not belong to your account'
+      });
+    }
+
+    session.isRevoked = true;
+    session.revokedAt = new Date();
+    await session.save();
+
+    // If the user revoked their own current device session, clear the auth cookie
+    if (req.currentSessionId && req.currentSessionId === session.sessionId) {
+      res.clearCookie('token', {
+        httpOnly: true,
+        secure: config.server.isProduction,
+        sameSite: config.server.isProduction ? 'none' : 'lax'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Device session revoked successfully',
+      revokedSessionId: session.sessionId
+    });
+  } catch (error) {
+    console.error('[Revoke Session Error]:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to revoke session'
+    });
+  }
+};
+
+// @desc    Revoke all other active login sessions (Logout all other devices)
+// @route   POST /api/auth/sessions/revoke-others
+// @access  Private (Authenticated User)
+const revokeAllOtherSessions = async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const currentSessionId = req.currentSessionId || null;
+
+    if (!isDatabaseConnected()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database service is currently unavailable'
+      });
+    }
+
+    const query = {
+      userId: String(userId),
+      isRevoked: false
+    };
+    if (currentSessionId) {
+      query.sessionId = { $ne: currentSessionId };
+    }
+
+    const result = await MongoDb.sessions.updateMany(query, {
+      $set: {
+        isRevoked: true,
+        revokedAt: new Date()
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Logged out of all other remote device sessions',
+      revokedCount: result.modifiedCount || 0
+    });
+  } catch (error) {
+    console.error('[Revoke Other Sessions Error]:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to revoke other sessions'
+    });
+  }
 };
 
 // @desc    Get current user profile
@@ -694,5 +912,8 @@ module.exports = {
   verifyOTP,
   submitRoleVerification,
   uploadProfilePhoto,
-  removeProfilePhoto
+  removeProfilePhoto,
+  getUserSessions,
+  revokeSession,
+  revokeAllOtherSessions
 };

@@ -10,7 +10,10 @@ const {
   verifyOTP,
   submitRoleVerification,
   uploadProfilePhoto,
-  removeProfilePhoto
+  removeProfilePhoto,
+  getUserSessions,
+  revokeSession,
+  revokeAllOtherSessions
 } = require('../controllers/authController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -31,5 +34,11 @@ router.get('/me', protect, getMe);
 router.put('/profile', protect, updateProfile);
 router.post('/profile-photo', protect, uploadProfilePhoto);
 router.delete('/profile-photo', protect, removeProfilePhoto);
+
+// Real Active Login Sessions & Device Management routes
+router.get('/sessions', protect, getUserSessions);
+router.post('/sessions/revoke-others', protect, revokeAllOtherSessions);
+router.post('/sessions/:sessionId/revoke', protect, revokeSession);
+router.delete('/sessions/:sessionId', protect, revokeSession);
 
 module.exports = router;

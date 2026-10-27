@@ -1,4 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { 
+  ActiveSession, 
+  fetchUserSessionsApi, 
+  revokeSessionApi, 
+  revokeAllOtherSessionsApi 
+} from '../../services/sessionService';
 import { useAuth } from '../../context/AuthContext';
 import { useHealthData } from '../../context/HealthDataContext';
 import { Card } from '../../components/ui/Card';
@@ -12,14 +18,7 @@ import {
   History, CheckCircle2, RefreshCw, XCircle, LogOut
 } from 'lucide-react';
 
-interface ActiveSession {
-  id: string;
-  device: string;
-  location: string;
-  ip: string;
-  lastActive: string;
-  isCurrent: boolean;
-}
+
 
 export const PatientSettings: React.FC = () => {
   const { user, logout } = useAuth();
@@ -33,25 +32,33 @@ export const PatientSettings: React.FC = () => {
   const [enable2FA, setEnable2FA] = useState(true);
   const [enableBiometrics, setEnableBiometrics] = useState(false);
 
-  // Active Login Sessions
-  const [sessions, setSessions] = useState<ActiveSession[]>([
-    {
-      id: 'sess_1',
-      device: 'Chrome on Windows 11 (Desktop)',
-      location: 'Bengaluru, India',
-      ip: '49.207.192.14',
-      lastActive: 'Active Now',
-      isCurrent: true
-    },
-    {
-      id: 'sess_2',
-      device: 'JIVEXA Android App (Pixel 8)',
-      location: 'Bengaluru, India',
-      ip: '106.51.88.22',
-      lastActive: '2 hours ago',
-      isCurrent: false
+  // Active Login Sessions (Dynamically fetched from backend)
+  const [sessions, setSessions] = useState<ActiveSession[]>([]);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
+  const [sessionError, setSessionError] = useState('');
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
+  const [isRevokingAll, setIsRevokingAll] = useState(false);
+
+  const loadSessions = async () => {
+    setIsLoadingSessions(true);
+    setSessionError('');
+    try {
+      const res = await fetchUserSessionsApi();
+      if (res.success && res.sessions) {
+        setSessions(res.sessions);
+      } else {
+        setSessionError(res.error || 'Unable to retrieve active sessions');
+      }
+    } catch (err: any) {
+      setSessionError(err.message || 'Error fetching active sessions');
+    } finally {
+      setIsLoadingSessions(false);
     }
-  ]);
+  };
+
+  useEffect(() => {
+    loadSessions();
+  }, []);
 
   // Password Form State
   const [passForm, setPassForm] = useState({ current: '', new: '', confirm: '' });
@@ -90,14 +97,38 @@ export const PatientSettings: React.FC = () => {
     setPassForm({ current: '', new: '', confirm: '' });
   };
 
-  const handleRevokeSession = (sessionId: string) => {
-    setSessions(prev => prev.filter(s => s.id !== sessionId));
-    setToastMsg('Device session revoked successfully.');
+  const handleRevokeSession = async (sessionId: string) => {
+    setRevokingSessionId(sessionId);
+    try {
+      const res = await revokeSessionApi(sessionId);
+      if (res.success) {
+        setSessions(prev => prev.filter(s => s.id !== sessionId));
+        setToastMsg('Device session revoked successfully.');
+      } else {
+        setToastMsg(`Error: ${res.error || 'Failed to revoke device session'}`);
+      }
+    } catch (err: any) {
+      setToastMsg(`Error: ${err.message || 'Unable to connect to server'}`);
+    } finally {
+      setRevokingSessionId(null);
+    }
   };
 
-  const handleRevokeAllOtherSessions = () => {
-    setSessions(prev => prev.filter(s => s.isCurrent));
-    setToastMsg('Logged out of all other remote device sessions.');
+  const handleRevokeAllOtherSessions = async () => {
+    setIsRevokingAll(true);
+    try {
+      const res = await revokeAllOtherSessionsApi();
+      if (res.success) {
+        setSessions(prev => prev.filter(s => s.isCurrent));
+        setToastMsg('Logged out of all other remote device sessions.');
+      } else {
+        setToastMsg(`Error: ${res.error || 'Failed to revoke other sessions'}`);
+      }
+    } catch (err: any) {
+      setToastMsg(`Error: ${err.message || 'Unable to connect to server'}`);
+    } finally {
+      setIsRevokingAll(false);
+    }
   };
 
   const handleDownloadBackup = () => {
@@ -245,50 +276,108 @@ export const PatientSettings: React.FC = () => {
       {/* 2. ACTIVE DEVICE SESSIONS & SESSION REVOCATION */}
       <Card title={<div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Laptop size={20} style={{ color: 'var(--primary)' }} /><span>Active Login Sessions & Devices</span></div>}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Manage active logins across desktop browsers and mobile apps.
+              Manage verified active logins across desktop browsers and mobile devices.
             </span>
-            {sessions.length > 1 && (
-              <Button size="sm" variant="outline" onClick={handleRevokeAllOtherSessions}>
+            {sessions.filter(s => !s.isCurrent).length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRevokeAllOtherSessions}
+                isLoading={isRevokingAll}
+                disabled={isRevokingAll}
+              >
                 Log Out All Other Devices
               </Button>
             )}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {sessions.map((sess) => (
-              <div key={sess.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid var(--border)', padding: '14px 18px', borderRadius: '16px', backgroundColor: sess.isCurrent ? '#f0fdfa' : 'white' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                  <div style={{ padding: '10px', backgroundColor: sess.isCurrent ? 'var(--primary-light)' : '#f1f5f9', color: sess.isCurrent ? 'var(--primary)' : 'var(--text-muted)', borderRadius: '12px' }}>
-                    {sess.device.includes('Android') ? <Smartphone size={20} /> : <Laptop size={20} />}
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <strong style={{ fontSize: '0.92rem', color: 'var(--text-dark)' }}>{sess.device}</strong>
-                      {sess.isCurrent && (
-                        <span style={{ backgroundColor: '#dcfce7', color: '#15803d', fontSize: '0.72rem', fontWeight: 800, padding: '2px 8px', borderRadius: '10px' }}>
-                          THIS DEVICE
-                        </span>
+          {/* Loading State */}
+          {isLoadingSessions && (
+            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <RefreshCw size={16} className="animate-spin" />
+              <span>Loading verified device sessions...</span>
+            </div>
+          )}
+
+          {/* Error State */}
+          {!isLoadingSessions && sessionError && (
+            <div style={{ padding: '16px', borderRadius: '12px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#dc2626', fontSize: '0.86rem' }}>
+                <AlertTriangle size={18} />
+                <span>{sessionError}</span>
+              </div>
+              <Button size="sm" variant="ghost" onClick={loadSessions}>
+                Retry
+              </Button>
+            </div>
+          )}
+
+          {/* Empty State */}
+          {!isLoadingSessions && !sessionError && sessions.length === 0 && (
+            <div style={{ padding: '28px 20px', textAlign: 'center', backgroundColor: '#f8fafc', borderRadius: '14px', border: '1px dashed var(--border)' }}>
+              <Laptop size={32} style={{ color: 'var(--text-muted)', margin: '0 auto 8px auto', opacity: 0.6 }} />
+              <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-dark)' }}>
+                No tracked login sessions available.
+              </p>
+              <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                New sessions will appear here automatically upon signing in from recognized devices.
+              </p>
+            </div>
+          )}
+
+          {/* Session List */}
+          {!isLoadingSessions && !sessionError && sessions.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {sessions.map((sess) => (
+                <div key={sess.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid var(--border)', padding: '14px 18px', borderRadius: '16px', backgroundColor: sess.isCurrent ? '#f0fdfa' : 'white' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <div style={{ padding: '10px', backgroundColor: sess.isCurrent ? 'var(--primary-light)' : '#f1f5f9', color: sess.isCurrent ? 'var(--primary)' : 'var(--text-muted)', borderRadius: '12px' }}>
+                      {sess.device.includes('Android') || sess.device.includes('iOS') || sess.device.includes('iPhone') || sess.device.includes('Mobile') ? (
+                        <Smartphone size={20} />
+                      ) : (
+                        <Laptop size={20} />
                       )}
                     </div>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginTop: '2px' }}>
-                      📍 {sess.location} • IP: {sess.ip} • {sess.lastActive}
-                    </span>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <strong style={{ fontSize: '0.92rem', color: 'var(--text-dark)' }}>{sess.device}</strong>
+                        {sess.isCurrent && (
+                          <span style={{ backgroundColor: '#dcfce7', color: '#15803d', fontSize: '0.72rem', fontWeight: 800, padding: '2px 8px', borderRadius: '10px' }}>
+                            THIS DEVICE
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginTop: '2px' }}>
+                        📍 {sess.location} • IP: {sess.ip} • {sess.lastActive}
+                      </span>
+                    </div>
                   </div>
-                </div>
 
-                {!sess.isCurrent && (
-                  <button 
-                    onClick={() => handleRevokeSession(sess.id)}
-                    style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '10px', padding: '6px 12px', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
-                  >
-                    Revoke
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
+                  {!sess.isCurrent && (
+                    <button 
+                      onClick={() => handleRevokeSession(sess.id)}
+                      disabled={revokingSessionId === sess.id}
+                      style={{
+                        backgroundColor: '#fef2f2',
+                        color: '#dc2626',
+                        border: '1px solid #fecaca',
+                        borderRadius: '10px',
+                        padding: '6px 12px',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        cursor: revokingSessionId === sess.id ? 'wait' : 'pointer',
+                        opacity: revokingSessionId === sess.id ? 0.6 : 1
+                      }}
+                    >
+                      {revokingSessionId === sess.id ? 'Revoking...' : 'Revoke'}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </Card>
 
