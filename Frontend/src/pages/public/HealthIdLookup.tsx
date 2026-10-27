@@ -282,7 +282,7 @@ export const HealthIdLookup: React.FC = () => {
               
               <div style={{ display: 'flex', gap: '12px' }} className="flex-col-mobile">
                 <Input
-                  placeholder="e.g. JIV-2026-685853 or JXV-STVAZREW"
+                  placeholder="e.g. JXV-STVAZREWPAT-202608-F4A1B, JXV-STVAZREW, or JIV-2026-685853"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   style={{ height: '50px', fontSize: '1.05rem', fontWeight: 800, fontFamily: 'monospace' }}
@@ -293,15 +293,109 @@ export const HealthIdLookup: React.FC = () => {
                 </Button>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.82rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: '16px', marginTop: '6px', flexWrap: 'wrap', gap: '10px' }}>
-                <span>Try Sample Demo Health IDs: 
-                  <code style={{ color: 'var(--primary)', cursor: 'pointer', fontWeight: 800, marginLeft: '6px', padding: '2px 8px', backgroundColor: 'var(--primary-light)', borderRadius: '6px' }} onClick={(e) => { setQuery('JXV-STVAZREW'); handleSearch(e, 'JXV-STVAZREW'); }}>JXV-STVAZREW</code>
-                  <code style={{ color: 'var(--primary)', cursor: 'pointer', fontWeight: 800, marginLeft: '6px', padding: '2px 8px', backgroundColor: 'var(--primary-light)', borderRadius: '6px' }} onClick={(e) => { setQuery('PAT-202608-F4A1B'); handleSearch(e, 'PAT-202608-F4A1B'); }}>PAT-202608-F4A1B</code>
-                </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', borderTop: '1px solid var(--border)', paddingTop: '16px', marginTop: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+                    Try Verified Sample Demo Health IDs (Click to verify):
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#10b981', fontWeight: 800, fontSize: '0.82rem' }}>
+                    <ShieldCheck size={16} /> 256-Bit Encrypted Lookup
+                  </span>
+                </div>
 
-                <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#10b981', fontWeight: 800 }}>
-                  <ShieldCheck size={16} /> 256-Bit Encrypted Lookup
-                </span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={(e) => { setQuery('JXV-STVAZREWPAT-202608-F4A1B'); handleSearch(e, 'JXV-STVAZREWPAT-202608-F4A1B'); }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      backgroundColor: 'rgba(15, 118, 110, 0.1)',
+                      border: '1.5px solid rgba(15, 118, 110, 0.35)',
+                      color: '#0f766e',
+                      fontWeight: 800,
+                      fontSize: '0.82rem',
+                      fontFamily: 'monospace',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                    title="Click to test sample demo ID JXV-STVAZREWPAT-202608-F4A1B"
+                  >
+                    <span>Sample Badge:</span> <strong>JXV-STVAZREWPAT-202608-F4A1B</strong>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => { setQuery('JXV-STVAZREW'); handleSearch(e, 'JXV-STVAZREW'); }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      backgroundColor: 'rgba(2, 132, 199, 0.1)',
+                      border: '1.5px solid rgba(2, 132, 199, 0.35)',
+                      color: '#0284c7',
+                      fontWeight: 800,
+                      fontSize: '0.82rem',
+                      fontFamily: 'monospace',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                    title="Click to test sample demo ID JXV-STVAZREW (Aarav Sharma)"
+                  >
+                    <span>Sample 1:</span> <strong>JXV-STVAZREW</strong> <span style={{ opacity: 0.75 }}>(Aarav • B+)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => { setQuery('PAT-202608-F4A1B'); handleSearch(e, 'PAT-202608-F4A1B'); }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                      border: '1.5px solid rgba(16, 185, 129, 0.35)',
+                      color: '#059669',
+                      fontWeight: 800,
+                      fontSize: '0.82rem',
+                      fontFamily: 'monospace',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                    title="Click to test sample demo ID PAT-202608-F4A1B (Meera Nair)"
+                  >
+                    <span>Sample 2:</span> <strong>PAT-202608-F4A1B</strong> <span style={{ opacity: 0.75 }}>(Meera • O+)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => { setQuery('JIV-2026-685853'); handleSearch(e, 'JIV-2026-685853'); }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                      border: '1.5px solid rgba(99, 102, 241, 0.35)',
+                      color: '#4f46e5',
+                      fontWeight: 800,
+                      fontSize: '0.82rem',
+                      fontFamily: 'monospace',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                    title="Click to test sample demo ID JIV-2026-685853 (Rajesh Varma)"
+                  >
+                    <span>Sample 3:</span> <strong>JIV-2026-685853</strong> <span style={{ opacity: 0.75 }}>(Rajesh • A+)</span>
+                  </button>
+                </div>
               </div>
             </form>
           ) : (
@@ -311,9 +405,14 @@ export const HealthIdLookup: React.FC = () => {
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0, maxWidth: '440px' }}>
                 Hold your camera or barcode scanner over the patient's JIVEXA Health Card to retrieve Level 1 Emergency Vitals.
               </p>
-              <Button type="button" onClick={(e) => { setQuery('JXV-STVAZREW'); setActiveSearchMode('id'); handleSearch(e, 'JXV-STVAZREW'); }} style={{ backgroundColor: '#0f766e', fontWeight: 800, borderRadius: '12px' }}>
-                Simulate Camera Scan (Demo)
-              </Button>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                <Button type="button" onClick={(e) => { setQuery('JXV-STVAZREWPAT-202608-F4A1B'); setActiveSearchMode('id'); handleSearch(e, 'JXV-STVAZREWPAT-202608-F4A1B'); }} style={{ backgroundColor: '#0f766e', fontWeight: 800, borderRadius: '12px' }}>
+                  Simulate Card Badge Scan (JXV-STVAZREWPAT-202608-F4A1B)
+                </Button>
+                <Button type="button" onClick={(e) => { setQuery('JXV-STVAZREW'); setActiveSearchMode('id'); handleSearch(e, 'JXV-STVAZREW'); }} style={{ backgroundColor: '#0284c7', fontWeight: 800, borderRadius: '12px' }}>
+                  Simulate Card Scan (JXV-STVAZREW)
+                </Button>
+              </div>
             </div>
           )}
 

@@ -33,11 +33,23 @@ const MongoDb = {
         query.roleId = String(filter.roleId).trim();
       }
       if (filter.healthId) {
-        const cleanHid = String(filter.healthId).toUpperCase().trim();
-        query.$or = [
-          { healthId: cleanHid },
-          { healthId: cleanHid.replace(/[^A-Z0-9]/g, '') }
-        ];
+        if (typeof filter.healthId === 'string') {
+          const cleanHid = filter.healthId.toUpperCase().trim();
+          query.$or = [
+            { healthId: cleanHid },
+            { healthId: cleanHid.replace(/[^A-Z0-9]/g, '') }
+          ];
+        } else {
+          query.healthId = filter.healthId;
+        }
+      }
+      if (filter.$or && Array.isArray(filter.$or)) {
+        query.$or = filter.$or.map((cond) => {
+          if (cond && typeof cond.healthId === 'string') {
+            return { ...cond, healthId: cond.healthId.toUpperCase().trim() };
+          }
+          return cond;
+        });
       }
       return await User.findOne(query);
     },
@@ -65,14 +77,18 @@ const MongoDb = {
     async findOne(filter = {}) {
       const query = {};
       if (filter.healthId) {
-        const clean = String(filter.healthId).toUpperCase().trim();
-        query.healthId = clean;
+        if (typeof filter.healthId === 'string') {
+          const clean = filter.healthId.toUpperCase().trim();
+          query.healthId = clean;
+        } else {
+          query.healthId = filter.healthId;
+        }
       } else if (filter.userId) {
         query.userId = String(filter.userId);
       } else if (filter.$or && Array.isArray(filter.$or)) {
         query.$or = filter.$or.map((cond) => {
-          if (cond.healthId) {
-            return { healthId: String(cond.healthId).toUpperCase().trim() };
+          if (cond && typeof cond.healthId === 'string') {
+            return { ...cond, healthId: cond.healthId.toUpperCase().trim() };
           }
           return cond;
         });
